@@ -9,7 +9,7 @@ public sealed class ArduinoSpeakerSequencer : MonoBehaviour
     private sealed class SpeakerGroup
     {
         public string name;
-        public int[] pins;
+        public int[] speakerNumbers;
     }
 
     [Header("Serial")]
@@ -25,19 +25,20 @@ public sealed class ArduinoSpeakerSequencer : MonoBehaviour
     public AudioSource audioSource;
     [Tooltip("Drag the preset audio clip here. The same clip will play for every speaker group.")]
     public AudioClip presetAudio;
-    [Tooltip("Enable this only when the computer should also play the preset audio.")]
-    [SerializeField] private bool playPresetAudioOnComputer;
-    [Tooltip("Speaker pin groups in playback order. For example: 24, then 35, then 6.")]
+    [Tooltip("Keep this enabled when the computer audio output feeds the amplifier.")]
+    [SerializeField] private bool playPresetAudioOnComputer = true;
+    [Tooltip("Speaker number groups in playback order. Speaker 1 maps to the first Arduino relay output, Speaker 20 maps to the last.")]
     [SerializeField]
     private SpeakerGroup[] speakerGroups =
     {
-        new SpeakerGroup { name = "24", pins = new[] { 2, 4 } },
-        new SpeakerGroup { name = "35", pins = new[] { 3, 5 } },
-        new SpeakerGroup { name = "6", pins = new[] { 6 } },
+        new SpeakerGroup
+        {
+            name = "All 20",
+            speakerNumbers = new[] { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20 }
+        },
     };
     [Tooltip("0 means loop forever.")]
     [SerializeField, Min(0)] private int repeatCount = 1;
-    [SerializeField, Min(1)] private int arduinoToneFrequencyHz = 880;
     [SerializeField, Min(0.01f)] private float speakerPlaySeconds = 0.5f;
     [SerializeField] private bool useAudioClipLength = true;
     [SerializeField, Min(0f)] private float gapSeconds = 0.15f;
@@ -177,9 +178,9 @@ public sealed class ArduinoSpeakerSequencer : MonoBehaviour
         StopPresetAudio();
     }
 
-    public void SetSpeakerPins(params int[] pins)
+    public void SetSpeakerPins(params int[] speakerNumbers)
     {
-        SetSpeakerGroups(new[] { pins });
+        SetSpeakerGroups(new[] { speakerNumbers });
     }
 
     public void SetSpeakerGroups(params int[][] groups)
@@ -193,16 +194,16 @@ public sealed class ArduinoSpeakerSequencer : MonoBehaviour
         speakerGroups = new SpeakerGroup[groups.Length];
         for (int index = 0; index < groups.Length; index++)
         {
-            int[] pins = groups[index] == null ? new int[0] : (int[])groups[index].Clone();
+            int[] speakerNumbers = groups[index] == null ? new int[0] : (int[])groups[index].Clone();
             speakerGroups[index] = new SpeakerGroup
             {
-                name = string.Join("", Array.ConvertAll(pins, pin => pin.ToString())),
-                pins = pins,
+                name = string.Join(",", Array.ConvertAll(speakerNumbers, speakerNumber => speakerNumber.ToString())),
+                speakerNumbers = speakerNumbers,
             };
         }
     }
 
-    public void PlaySingleSpeaker(int speakerPin)
+    public void PlaySingleSpeaker(int speakerNumber)
     {
         if (!IsConnected && !Connect())
         {
@@ -210,7 +211,25 @@ public sealed class ArduinoSpeakerSequencer : MonoBehaviour
         }
 
         float durationSeconds = GetPlaybackDurationSeconds();
-        SendGroupCommand(new[] { speakerPin }, durationSeconds);
+        SendGroupCommand(new[] { speakerNumber }, durationSeconds);
+        PlayPresetAudioIfEnabled();
+    }
+
+    public void PlayAllSpeakers()
+    {
+        int[] allSpeakerNumbers = new int[20];
+        for (int index = 0; index < allSpeakerNumbers.Length; index++)
+        {
+            allSpeakerNumbers[index] = index + 1;
+        }
+
+        if (!IsConnected && !Connect())
+        {
+            return;
+        }
+
+        float durationSeconds = GetPlaybackDurationSeconds();
+        SendGroupCommand(allSpeakerNumbers, durationSeconds);
         PlayPresetAudioIfEnabled();
     }
 
@@ -240,14 +259,14 @@ public sealed class ArduinoSpeakerSequencer : MonoBehaviour
             for (int index = 0; index < speakerGroups.Length; index++)
             {
                 SpeakerGroup speakerGroup = speakerGroups[index];
-                if (speakerGroup == null || speakerGroup.pins == null || speakerGroup.pins.Length == 0)
+                if (speakerGroup == null || speakerGroup.speakerNumbers == null || speakerGroup.speakerNumbers.Length == 0)
                 {
                     Debug.LogWarning("Skipping empty speaker group at index: " + index);
                     continue;
                 }
 
                 float durationSeconds = GetPlaybackDurationSeconds();
-                SendGroupCommand(speakerGroup.pins, durationSeconds);
+                SendGroupCommand(speakerGroup.speakerNumbers, durationSeconds);
                 PlayPresetAudioIfEnabled();
                 yield return new WaitForSeconds(durationSeconds + gapSeconds);
             }
@@ -308,22 +327,21 @@ public sealed class ArduinoSpeakerSequencer : MonoBehaviour
         }
     }
 
-    private void SendGroupCommand(int[] pins, float durationSeconds)
+    private void SendGroupCommand(int[] speakerNumbers, float durationSeconds)
     {
         int durationMs = Mathf.Max(1, Mathf.RoundToInt(durationSeconds * 1000f));
-        int frequencyHz = Mathf.Max(1, arduinoToneFrequencyHz);
-        string command = "GROUP " + durationMs + " " + frequencyHz;
+        string command = "GROUP " + durationMs;
 
-        for (int index = 0; index < pins.Length; index++)
+        for (int index = 0; index < speakerNumbers.Length; index++)
         {
-            int pin = pins[index];
-            if (pin < 0)
+            int speakerNumber = speakerNumbers[index];
+            if (speakerNumber < 1 || speakerNumber > 20)
             {
-                Debug.LogWarning("Skipping invalid speaker pin: " + pin);
+                Debug.LogWarning("Skipping invalid speaker number: " + speakerNumber + ". Use 1-20.");
                 continue;
             }
 
-            command += " " + pin;
+            command += " " + speakerNumber;
         }
 
         SendLine(command);

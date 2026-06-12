@@ -2,20 +2,32 @@
 #include <string.h>
 
 const long BaudRate = 115200;
-const size_t CommandBufferSize = 64;
-const size_t MaxActivePins = 8;
+const size_t CommandBufferSize = 128;
+const size_t SpeakerCount = 20;
+const size_t MaxActivePins = SpeakerCount;
+const bool RelayActiveLow = true;
+const int RelayPins[SpeakerCount] = {
+    22, 23, 24, 25,
+    26, 27, 28, 29,
+    30, 31, 32, 33,
+    34, 35, 36, 37,
+    38, 39, 40, 41
+};
 
 char commandBuffer[CommandBufferSize];
 size_t commandLength = 0;
 int activePins[MaxActivePins];
 size_t activePinCount = 0;
 unsigned long activeStopAtMs = 0;
-unsigned long activeNextToggleAtUs = 0;
-unsigned long activeHalfPeriodUs = 0;
-bool activeOutputHigh = false;
 
 void setup()
 {
+    for (size_t index = 0; index < SpeakerCount; index++)
+    {
+        pinMode(RelayPins[index], OUTPUT);
+        setRelay(RelayPins[index], false);
+    }
+
     Serial.begin(BaudRate);
     Serial.println("READY");
 }
@@ -77,50 +89,48 @@ void handleCommand(char *line)
     }
 
     char *durationToken = strtok(NULL, " ");
-    char *frequencyToken = strtok(NULL, " ");
-    if (durationToken == NULL || frequencyToken == NULL)
+    if (durationToken == NULL)
     {
         Serial.println("ERR FORMAT");
         return;
     }
 
     unsigned long durationMs = strtoul(durationToken, NULL, 10);
-    unsigned long frequencyHz = strtoul(frequencyToken, NULL, 10);
-    if (durationMs == 0 || frequencyHz == 0)
+    if (durationMs == 0)
     {
         Serial.println("ERR VALUE");
         return;
     }
 
-    int pins[MaxActivePins];
-    size_t pinCount = 0;
-    char *pinToken = strtok(NULL, " ");
-    while (pinToken != NULL && pinCount < MaxActivePins)
+    int relayPins[MaxActivePins];
+    size_t relayPinCount = 0;
+    char *speakerToken = strtok(NULL, " ");
+    while (speakerToken != NULL && relayPinCount < MaxActivePins)
     {
-        int speakerPin = atoi(pinToken);
-        if (speakerPin < 0)
+        int speakerNumber = atoi(speakerToken);
+        if (speakerNumber < 1 || speakerNumber > (int)SpeakerCount)
         {
             Serial.println("ERR VALUE");
             return;
         }
 
-        pins[pinCount] = speakerPin;
-        pinCount++;
-        pinToken = strtok(NULL, " ");
+        relayPins[relayPinCount] = RelayPins[speakerNumber - 1];
+        relayPinCount++;
+        speakerToken = strtok(NULL, " ");
     }
 
-    if (pinCount == 0)
+    if (relayPinCount == 0)
     {
         Serial.println("ERR FORMAT");
         return;
     }
 
-    playSpeakerGroup(pins, pinCount, durationMs, frequencyHz);
+    playSpeakerGroup(relayPins, relayPinCount, durationMs);
     Serial.print("OK GROUP ");
-    Serial.println(pinCount);
+    Serial.println(relayPinCount);
 }
 
-void playSpeakerGroup(int pins[], size_t pinCount, unsigned long durationMs, unsigned long frequencyHz)
+void playSpeakerGroup(int pins[], size_t pinCount, unsigned long durationMs)
 {
     stopActiveSpeaker();
 
@@ -128,20 +138,12 @@ void playSpeakerGroup(int pins[], size_t pinCount, unsigned long durationMs, uns
     {
         int speakerPin = pins[index];
         pinMode(speakerPin, OUTPUT);
-        digitalWrite(speakerPin, LOW);
+        setRelay(speakerPin, true);
         activePins[index] = speakerPin;
     }
 
     activePinCount = pinCount;
     activeStopAtMs = millis() + durationMs;
-    activeHalfPeriodUs = 500000UL / frequencyHz;
-    if (activeHalfPeriodUs == 0)
-    {
-        activeHalfPeriodUs = 1;
-    }
-
-    activeNextToggleAtUs = micros();
-    activeOutputHigh = false;
 }
 
 void updateActiveSpeaker()
@@ -149,39 +151,22 @@ void updateActiveSpeaker()
     if (activePinCount > 0 && (long)(millis() - activeStopAtMs) >= 0)
     {
         stopActiveSpeaker();
-        return;
     }
-
-    if (activePinCount == 0)
-    {
-        return;
-    }
-
-    unsigned long nowUs = micros();
-    if ((long)(nowUs - activeNextToggleAtUs) < 0)
-    {
-        return;
-    }
-
-    activeOutputHigh = !activeOutputHigh;
-    for (size_t index = 0; index < activePinCount; index++)
-    {
-        digitalWrite(activePins[index], activeOutputHigh ? HIGH : LOW);
-    }
-
-    activeNextToggleAtUs = nowUs + activeHalfPeriodUs;
 }
 
 void stopActiveSpeaker()
 {
     for (size_t index = 0; index < activePinCount; index++)
     {
-        digitalWrite(activePins[index], LOW);
+        setRelay(activePins[index], false);
     }
 
     activePinCount = 0;
     activeStopAtMs = 0;
-    activeNextToggleAtUs = 0;
-    activeHalfPeriodUs = 0;
-    activeOutputHigh = false;
+}
+
+void setRelay(int relayPin, bool enabled)
+{
+    bool outputHigh = RelayActiveLow ? !enabled : enabled;
+    digitalWrite(relayPin, outputHigh ? HIGH : LOW);
 }
