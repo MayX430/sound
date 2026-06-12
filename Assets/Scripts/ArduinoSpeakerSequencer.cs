@@ -17,7 +17,7 @@ public sealed class ArduinoSpeakerSequencer : MonoBehaviour
     [SerializeField] private int baudRate = 115200;
     [SerializeField] private int readTimeoutMs = 50;
     [SerializeField] private int writeTimeoutMs = 100;
-    [SerializeField] private bool connectOnStart = true;
+    [SerializeField] private bool connectOnStart;
     [SerializeField] private bool playOnStart;
 
     [Header("Playback")]
