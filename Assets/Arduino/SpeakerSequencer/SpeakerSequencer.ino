@@ -10,6 +10,9 @@ size_t commandLength = 0;
 int activePins[MaxActivePins];
 size_t activePinCount = 0;
 unsigned long activeStopAtMs = 0;
+unsigned long activeNextToggleAtUs = 0;
+unsigned long activeHalfPeriodUs = 0;
+bool activeOutputHigh = false;
 
 void setup()
 {
@@ -74,14 +77,16 @@ void handleCommand(char *line)
     }
 
     char *durationToken = strtok(NULL, " ");
-    if (durationToken == NULL)
+    char *frequencyToken = strtok(NULL, " ");
+    if (durationToken == NULL || frequencyToken == NULL)
     {
         Serial.println("ERR FORMAT");
         return;
     }
 
     unsigned long durationMs = strtoul(durationToken, NULL, 10);
-    if (durationMs == 0)
+    unsigned long frequencyHz = strtoul(frequencyToken, NULL, 10);
+    if (durationMs == 0 || frequencyHz == 0)
     {
         Serial.println("ERR VALUE");
         return;
@@ -110,12 +115,12 @@ void handleCommand(char *line)
         return;
     }
 
-    playSpeakerGroup(pins, pinCount, durationMs);
+    playSpeakerGroup(pins, pinCount, durationMs, frequencyHz);
     Serial.print("OK GROUP ");
     Serial.println(pinCount);
 }
 
-void playSpeakerGroup(int pins[], size_t pinCount, unsigned long durationMs)
+void playSpeakerGroup(int pins[], size_t pinCount, unsigned long durationMs, unsigned long frequencyHz)
 {
     stopActiveSpeaker();
 
@@ -123,12 +128,20 @@ void playSpeakerGroup(int pins[], size_t pinCount, unsigned long durationMs)
     {
         int speakerPin = pins[index];
         pinMode(speakerPin, OUTPUT);
-        digitalWrite(speakerPin, HIGH);
+        digitalWrite(speakerPin, LOW);
         activePins[index] = speakerPin;
     }
 
     activePinCount = pinCount;
     activeStopAtMs = millis() + durationMs;
+    activeHalfPeriodUs = 500000UL / frequencyHz;
+    if (activeHalfPeriodUs == 0)
+    {
+        activeHalfPeriodUs = 1;
+    }
+
+    activeNextToggleAtUs = micros();
+    activeOutputHigh = false;
 }
 
 void updateActiveSpeaker()
@@ -136,7 +149,27 @@ void updateActiveSpeaker()
     if (activePinCount > 0 && (long)(millis() - activeStopAtMs) >= 0)
     {
         stopActiveSpeaker();
+        return;
     }
+
+    if (activePinCount == 0)
+    {
+        return;
+    }
+
+    unsigned long nowUs = micros();
+    if ((long)(nowUs - activeNextToggleAtUs) < 0)
+    {
+        return;
+    }
+
+    activeOutputHigh = !activeOutputHigh;
+    for (size_t index = 0; index < activePinCount; index++)
+    {
+        digitalWrite(activePins[index], activeOutputHigh ? HIGH : LOW);
+    }
+
+    activeNextToggleAtUs = nowUs + activeHalfPeriodUs;
 }
 
 void stopActiveSpeaker()
@@ -148,4 +181,7 @@ void stopActiveSpeaker()
 
     activePinCount = 0;
     activeStopAtMs = 0;
+    activeNextToggleAtUs = 0;
+    activeHalfPeriodUs = 0;
+    activeOutputHigh = false;
 }

@@ -25,6 +25,8 @@ public sealed class ArduinoSpeakerSequencer : MonoBehaviour
     public AudioSource audioSource;
     [Tooltip("Drag the preset audio clip here. The same clip will play for every speaker group.")]
     public AudioClip presetAudio;
+    [Tooltip("Enable this only when the computer should also play the preset audio.")]
+    [SerializeField] private bool playPresetAudioOnComputer;
     [Tooltip("Speaker pin groups in playback order. For example: 24, then 35, then 6.")]
     [SerializeField]
     private SpeakerGroup[] speakerGroups =
@@ -35,6 +37,7 @@ public sealed class ArduinoSpeakerSequencer : MonoBehaviour
     };
     [Tooltip("0 means loop forever.")]
     [SerializeField, Min(0)] private int repeatCount = 1;
+    [SerializeField, Min(1)] private int arduinoToneFrequencyHz = 880;
     [SerializeField, Min(0.01f)] private float speakerPlaySeconds = 0.5f;
     [SerializeField] private bool useAudioClipLength = true;
     [SerializeField, Min(0f)] private float gapSeconds = 0.15f;
@@ -208,7 +211,7 @@ public sealed class ArduinoSpeakerSequencer : MonoBehaviour
 
         float durationSeconds = GetPlaybackDurationSeconds();
         SendGroupCommand(new[] { speakerPin }, durationSeconds);
-        PlayPresetAudio();
+        PlayPresetAudioIfEnabled();
     }
 
     private IEnumerator PlaySequenceRoutine()
@@ -245,7 +248,7 @@ public sealed class ArduinoSpeakerSequencer : MonoBehaviour
 
                 float durationSeconds = GetPlaybackDurationSeconds();
                 SendGroupCommand(speakerGroup.pins, durationSeconds);
-                PlayPresetAudio();
+                PlayPresetAudioIfEnabled();
                 yield return new WaitForSeconds(durationSeconds + gapSeconds);
             }
         }
@@ -261,6 +264,16 @@ public sealed class ArduinoSpeakerSequencer : MonoBehaviour
         }
 
         return Mathf.Max(0.01f, speakerPlaySeconds);
+    }
+
+    private void PlayPresetAudioIfEnabled()
+    {
+        if (!playPresetAudioOnComputer)
+        {
+            return;
+        }
+
+        PlayPresetAudio();
     }
 
     private void PlayPresetAudio()
@@ -298,7 +311,8 @@ public sealed class ArduinoSpeakerSequencer : MonoBehaviour
     private void SendGroupCommand(int[] pins, float durationSeconds)
     {
         int durationMs = Mathf.Max(1, Mathf.RoundToInt(durationSeconds * 1000f));
-        string command = "GROUP " + durationMs;
+        int frequencyHz = Mathf.Max(1, arduinoToneFrequencyHz);
+        string command = "GROUP " + durationMs + " " + frequencyHz;
 
         for (int index = 0; index < pins.Length; index++)
         {
